@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import re
+import random
 from datetime import datetime
 from playwright.async_api import async_playwright
 
@@ -99,18 +101,34 @@ async def main():
     
     async with async_playwright() as p:
         print("جاري تشغيل المتصفح الخفي...")
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        # تحسين المتصفح ليتخفى من الحماية
+        browser = await p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-blink-features=AutomationControlled']
+        )
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080}
+        )
+        
+        page = await context.new_page()
         
         try:
             print("جاري فتح صفحة IAAI...")
-            await page.goto(SEARCH_URL, wait_until="networkidle", timeout=60000)
+            # ننتظر حتى تحميل الـ HTML الأساسي فقط
+            await page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
+            
+            # ننتظر 10 ثوانٍ إضافية لكي يقوم الموقع بمعالجة الحماية وجلب البيانات
+            print("انتظار 10 ثوانٍ لمعالجة الحماية...")
+            await asyncio.sleep(10)
             
             # استخراج بيانات JSON من داخل الصفحة
             data = await page.evaluate("() => window.__PRELOADED_STATE__")
             
             if not data:
-                print("لم يتم العثور على بيانات السيارات في الصفحة (المتغير غير موجود).")
+                print("لم يتم العثور على البيانات في الصفحة. قد تكون الحماية ما زالت تمنعنا.")
+                html_content = await page.content()
+                print(f"طول صفحة HTML المستلمة: {len(html_content)} حرف.")
                 await browser.close()
                 return
                 
