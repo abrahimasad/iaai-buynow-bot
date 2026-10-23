@@ -5,10 +5,9 @@ import re
 from datetime import datetime
 from playwright.async_api import async_playwright
 
-# قراءة الإعدادات من GitHub Secrets بأمان
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-IAAI_COOKIES_STR = os.environ.get("IAAI_COOKIES", "[]")
+# الإعدادات (يجب أن تكون موجودة في متغيرات البيئة)
+TELEGRAM_TOKEN = "8753580180:AAGeqNP2i7Mz2HPTe1yz4btCEdQ3s4egsdY"
+TELEGRAM_CHAT_ID = "-1004331051453"
 
 SEARCH_URL = "https://ca.iaai.com/search?url=VsoyNCWV1wQJY1OShrTHQEFSOrymOTM4goP8Gtj6oppB/Z5bU4Gie3t/N19YKgq7ORCvsXylBZephKBNJ2p4WYRjbPTOZ1O5j46ZcpX0="
 
@@ -29,6 +28,7 @@ def save_seen(seen):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(list(seen), f)
 
+# دالة إرسال الرسائل إلى تيليجرام
 def send_telegram(text):
     import requests
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -100,50 +100,37 @@ async def main():
     setup_dirs()
     seen = load_seen()
     
-    # تحويل الكوكيز من نص إلى قائمة
-    try:
-        cookies = json.loads(IAAI_COOKIES_STR)
-    except Exception as e:
-        print(f"خطأ في قراءة الكوكيز: {e}")
-        return
+    send_telegram("🔄 <b>بدء دورة مراقبة جديدة...</b>")
 
     async with async_playwright() as p:
-        print("جاري تشغيل المتصفح الخفي...")
+        send_telegram("🌐 جاري فتح المتصفح الخفي...")
         browser = await p.chromium.launch(
             headless=True,
             args=['--no-sandbox', '--disable-blink-features=AutomationControlled']
         )
         
-        # إعداد المتصفح ليتخفى ويستخدم الكوكيز
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080}
         )
         
-        # إضافة الكوكيز المسحوبة
-        await context.add_cookies(cookies)
-        
         page = await context.new_page()
         
         try:
-            print("جاري فتح صفحة IAAI...")
+            send_telegram("⏳ جاري تحميل موقع IAAI (انتظار 15 ثانية)...")
             await page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
+            await asyncio.sleep(15) # انتظار أطول للحماية
             
-            print("انتظار 10 ثوانٍ لمعالجة الحماية...")
-            await asyncio.sleep(10)
-            
-            # استخراج بيانات JSON من داخل الصفحة
             data = await page.evaluate("() => window.__PRELOADED_STATE__")
             
             if not data:
-                print("لم يتم العثور على البيانات في الصفحة.")
                 html_content = await page.content()
-                print(f"طول صفحة HTML: {len(html_content)} حرف.")
+                send_telegram(f"⚠️ <b>لم يتم العثور على البيانات!</b>\nطول صفحة HTML: {len(html_content)} حرف.\nقد تكون الحماية ما زالت تمنعنا.")
                 await browser.close()
                 return
                 
             vehicles = data.get('search', {}).get('results', {}).get('vehicles', [])
-            print(f"تم العثور على {len(vehicles)} سيارة في الصفحة.")
+            send_telegram(f"✅ <b>تم قراءة الصفحة بنجاح!</b>\nعدد السيارات الموجودة: {len(vehicles)}")
             
             new_count = 0
             for v in vehicles:
@@ -169,12 +156,12 @@ async def main():
 
             if new_count > 0:
                 save_seen(seen)
-                print(f"تم إرسال {new_count} سيارة جديدة.")
+                send_telegram(f"🎉 <b>تم إرسال {new_count} سيارة جديدة بنجاح.</b>")
             else:
-                print("لا توجد سيارات جديدة.")
+                send_telegram("ℹ️ لا توجد سيارات جديدة في هذه الدورة.")
                 
         except Exception as e:
-            print(f"حدث خطأ: {e}")
+            send_telegram(f"❌ <b>حدث خطأ تقني:</b>\n{e}")
         finally:
             await browser.close()
 
