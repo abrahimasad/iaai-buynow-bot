@@ -2,12 +2,13 @@ import asyncio
 import json
 import os
 import re
-import random
 from datetime import datetime
 from playwright.async_api import async_playwright
 
+# قراءة الإعدادات من GitHub Secrets بأمان
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+IAAI_COOKIES_STR = os.environ.get("IAAI_COOKIES", "[]")
 
 SEARCH_URL = "https://ca.iaai.com/search?url=VsoyNCWV1wQJY1OShrTHQEFSOrymOTM4goP8Gtj6oppB/Z5bU4Gie3t/N19YKgq7ORCvsXylBZephKBNJ2p4WYRjbPTOZ1O5j46ZcpX0="
 
@@ -99,26 +100,35 @@ async def main():
     setup_dirs()
     seen = load_seen()
     
+    # تحويل الكوكيز من نص إلى قائمة
+    try:
+        cookies = json.loads(IAAI_COOKIES_STR)
+    except Exception as e:
+        print(f"خطأ في قراءة الكوكيز: {e}")
+        return
+
     async with async_playwright() as p:
         print("جاري تشغيل المتصفح الخفي...")
-        # تحسين المتصفح ليتخفى من الحماية
         browser = await p.chromium.launch(
             headless=True,
             args=['--no-sandbox', '--disable-blink-features=AutomationControlled']
         )
+        
+        # إعداد المتصفح ليتخفى ويستخدم الكوكيز
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080}
         )
         
+        # إضافة الكوكيز المسحوبة
+        await context.add_cookies(cookies)
+        
         page = await context.new_page()
         
         try:
             print("جاري فتح صفحة IAAI...")
-            # ننتظر حتى تحميل الـ HTML الأساسي فقط
             await page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
             
-            # ننتظر 10 ثوانٍ إضافية لكي يقوم الموقع بمعالجة الحماية وجلب البيانات
             print("انتظار 10 ثوانٍ لمعالجة الحماية...")
             await asyncio.sleep(10)
             
@@ -126,9 +136,9 @@ async def main():
             data = await page.evaluate("() => window.__PRELOADED_STATE__")
             
             if not data:
-                print("لم يتم العثور على البيانات في الصفحة. قد تكون الحماية ما زالت تمنعنا.")
+                print("لم يتم العثور على البيانات في الصفحة.")
                 html_content = await page.content()
-                print(f"طول صفحة HTML المستلمة: {len(html_content)} حرف.")
+                print(f"طول صفحة HTML: {len(html_content)} حرف.")
                 await browser.close()
                 return
                 
