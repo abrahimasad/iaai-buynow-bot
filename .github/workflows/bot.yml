@@ -2,8 +2,8 @@ name: IAAI Buy Now Monitor
 
 on:
   schedule:
-    - cron: '*/1 * * * *' # يعمل كل دقيقة
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً للتجربة
+    - cron: '*/5 * * * *' # كل 5 دقائق (لأن المتصفح يستهلك وقتاً)
+  workflow_dispatch:
 
 jobs:
   check-bot:
@@ -18,9 +18,10 @@ jobs:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install playwright requests
+          playwright install chromium
 
-      # استرجاع الذاكرة (السيارات التي أُرسلت سابقاً)
       - name: Restore seen vehicles cache
         uses: actions/cache@v4
         with:
