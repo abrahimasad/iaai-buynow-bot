@@ -1,14 +1,12 @@
-import requests
+import asyncio
 import json
 import os
-import re
 from datetime import datetime
+from playwright.async_api import async_playwright
 
-# قراءة الإعدادات من GitHub Secrets بأمان
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# رابط البحث الخاص بك
 SEARCH_URL = "https://ca.iaai.com/search?url=VsoyNCWV1wQJY1OShrTHQEFSOrymOTM4goP8Gtj6oppB/Z5bU4Gie3t/N19YKgq7ORCvsXylBZephKBNJ2p4WYRjbPTOZ1O5j46ZcpX0="
 
 BASE_DIR = os.path.join(os.path.expanduser("~"), "IAAI_BuyNow_Bot")
@@ -29,6 +27,7 @@ def save_seen(seen):
         json.dump(list(seen), f)
 
 def send_telegram(text):
+    import requests
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
     try:
@@ -37,9 +36,7 @@ def send_telegram(text):
         print(f"Telegram Error: {e}")
 
 def save_txt_file(v, vin_masked):
-    """حفظ الملف النصي بنفس التنسيق المطلوب حرفياً"""
     stock_id = str(v.get("StockId", ""))
-    
     year = v.get("Year", "")
     make = v.get("Make", "")
     model = v.get("Model", "")
@@ -96,56 +93,62 @@ Image URLs:
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-def check_vehicles():
+async def main():
     setup_dirs()
     seen = load_seen()
     
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
-    try:
-        resp = requests.get(SEARCH_URL, headers=headers, timeout=30)
-        if resp.status_code != 200:
-            print(f"HTTP Error: {resp.status_code}")
-            return
-
-        matches = re.findall(r'window\.__PRELOADED_STATE__ = ({.*?});', resp.text)
-        if not matches:
-            print("لم يتم العثور على بيانات السيارات.")
-            return
-            
-        data = json.loads(matches[0])
-        vehicles = data.get('search', {}).get('results', {}).get('vehicles', [])
+    async with async_playwright() as p:
+        print("جاري تشغيل المتصفح الخفي...")
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
         
-        new_count = 0
-        for v in vehicles:
-            stock_id = str(v.get("StockId", ""))
-            if not stock_id or stock_id in seen:
-                continue
-
-            vin_masked = v.get("VIN", "") or v.get("Vin", "")
-            save_txt_file(v, vin_masked)
+        try:
+            print("جاري فتح صفحة IAAI...")
+            await page.goto(SEARCH_URL, wait_until="networkidle", timeout=60000)
             
-            msg = (
-                f"🚨 <b>سيارة Buy Now جديدة!</b>\n\n"
-                f"🚗 <b>{v.get('Year', '')} {v.get('Make', '')} {v.get('Model', '')}</b>\n"
-                f"🆔 Stock: <code>{stock_id}</code>\n"
-                f"🔑 VIN: <code>{vin_masked}</code>\n"
-                f"💰 Buy Now: {v.get('BuyNowPrice', '')}\n"
-                f"📍 {v.get('Location', '')}\n"
-                f"🔗 <a href='https://ca.iaai.com/vehicle-details/{stock_id}'>اضغط لفتح السيارة</a>"
-            )
-            send_telegram(msg)
+            # استخراج بيانات JSON من داخل الصفحة
+            data = await page.evaluate("() => window.__PRELOADED_STATE__")
             
-            seen.add(stock_id)
-            new_count += 1
+            if not data:
+                print("لم يتم العثور على بيانات السيارات في الصفحة (المتغير غير موجود).")
+                await browser.close()
+                return
+                
+            vehicles = data.get('search', {}).get('results', {}).get('vehicles', [])
+            print(f"تم العثور على {len(vehicles)} سيارة في الصفحة.")
+            
+            new_count = 0
+            for v in vehicles:
+                stock_id = str(v.get("StockId", ""))
+                if not stock_id or stock_id in seen:
+                    continue
 
-        if new_count > 0:
-            save_seen(seen)
-            print(f"تم العثور على {new_count} سيارة جديدة.")
-        else:
-            print("لا توجد سيارات جديدة.")
+                vin_masked = v.get("VIN", "") or v.get("Vin", "")
+                save_txt_file(v, vin_masked)
+                
+                msg = (
+                    f"🚨 <b>سيارة Buy Now جديدة!</b>\n\n"
+                    f"🚗 <b>{v.get('Year', '')} {v.get('Make', '')} {v.get('Model', '')}</b>\n"
+                    f"🆔 Stock: <code>{stock_id}</code>\n"
+                    f"🔑 VIN: <code>{vin_masked}</code>\n"
+                    f"💰 Buy Now: {v.get('BuyNowPrice', '')}\n"
+                    f"📍 {v.get('Location', '')}\n"
+                    f"🔗 <a href='https://ca.iaai.com/vehicle-details/{stock_id}'>اضغط لفتح السيارة</a>"
+                )
+                send_telegram(msg)
+                seen.add(stock_id)
+                new_count += 1
 
-    except Exception as e:
-        print(f"Error: {e}")
+            if new_count > 0:
+                save_seen(seen)
+                print(f"تم إرسال {new_count} سيارة جديدة.")
+            else:
+                print("لا توجد سيارات جديدة.")
+                
+        except Exception as e:
+            print(f"حدث خطأ: {e}")
+        finally:
+            await browser.close()
 
 if __name__ == "__main__":
-    check_vehicles()
+    asyncio.run(main())
